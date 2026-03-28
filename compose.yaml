@@ -1,0 +1,60 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: drydock-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-drydock}
+      POSTGRES_USER: ${POSTGRES_USER:-drydock}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-drydock}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-drydock} -d ${POSTGRES_DB:-drydock}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - drydock
+
+  api:
+    build:
+      context: ./api
+    container_name: drydock-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      API_PORT: 3000
+      DATABASE_URL: postgres://${POSTGRES_USER:-drydock}:${POSTGRES_PASSWORD:-drydock}@postgres:5432/${POSTGRES_DB:-drydock}
+    ports:
+      - "${API_PORT:-3000}:3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "fetch('http://127.0.0.1:3000/health').then((response)=>{if(!response.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - drydock
+
+volumes:
+  postgres_data:
+
+networks:
+  drydock:
