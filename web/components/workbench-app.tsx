@@ -5,6 +5,7 @@ import { AlertCircle, LayoutGrid, List, LoaderCircle, Plus, Workflow } from "luc
 import { useEffect, useState } from "react"
 
 import { BoardLoadingState, BoardView } from "@/components/board-view"
+import { ConnectionIndicator } from "@/components/connection-indicator"
 import { ItemDetailSheet } from "@/components/item-detail-sheet"
 import { ListView } from "@/components/list-view"
 import { Badge } from "@/components/ui/badge"
@@ -182,9 +183,9 @@ export function WorkbenchApp() {
                   : `Show ${HIDDEN_BOARD_STATUSES.join(" / ")}`}
               </Button>
             ) : null}
-            <p className="text-xs text-slate-500">
-              REST requests are proxied through <code>/api</code>.
-            </p>
+            <div className="ml-auto">
+              <ConnectionIndicator />
+            </div>
           </div>
 
           {createItemMutation.isError ? (

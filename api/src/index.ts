@@ -18,6 +18,7 @@ import type { SQL } from "drizzle-orm";
 import { config } from "./config";
 import { checkDatabase, db, runInTransaction } from "./db";
 import type { DbTransaction } from "./db";
+import { addClient, broadcast, removeClient } from "./ws";
 import {
   agentRunCiStatusEnum,
   agentRunStatusEnum,
@@ -987,7 +988,9 @@ app.post("/items", async (c) => {
     return created;
   });
 
-  return respond(c, serializeItem(item), 201);
+  const serialized = serializeItem(item);
+  broadcast("item.created", serialized);
+  return respond(c, serialized, 201);
 });
 
 app.get("/items", async (c) => {
@@ -1118,7 +1121,9 @@ app.patch("/items/:id", async (c) => {
     return updated;
   });
 
-  return respond(c, serializeItem(item));
+  const serialized = serializeItem(item);
+  broadcast("item.updated", serialized);
+  return respond(c, serialized);
 });
 
 app.delete("/items/:id", async (c) => {
@@ -1141,7 +1146,9 @@ app.delete("/items/:id", async (c) => {
     return updated;
   });
 
-  return respond(c, serializeItem(item));
+  const serialized = serializeItem(item);
+  broadcast("item.updated", serialized);
+  return respond(c, serialized);
 });
 
 app.get("/items/:id/children", async (c) => {
@@ -1200,6 +1207,7 @@ app.post("/items/:id/dependencies", async (c) => {
     return serializeDetailedItem(tx, dependsOn, 1);
   });
 
+  broadcast("dependency.created", { item_id: itemId, depends_on_id: body.dependsOnId });
   return respond(c, dependency, 201);
 });
 
@@ -1231,6 +1239,7 @@ app.delete("/items/:id/dependencies/:dependsOnId", async (c) => {
     }
   });
 
+  broadcast("dependency.removed", { item_id: itemId, depends_on_id: dependsOnId });
   return c.body(null, 204);
 });
 
@@ -1294,6 +1303,7 @@ app.post("/items/:id/tags", async (c) => {
     return resolvedTag;
   });
 
+  broadcast("item.updated", { item_id: itemId, tag: serializeTag(tag) });
   return c.json(
     {
       data: {
@@ -1328,6 +1338,7 @@ app.delete("/items/:id/tags/:tagId", async (c) => {
     }
   });
 
+  broadcast("item.updated", { item_id: itemId, tag_id: tagId });
   return c.body(null, 204);
 });
 
@@ -1358,7 +1369,9 @@ app.post("/tags", async (c) => {
     return created;
   });
 
-  return respond(c, serializeTag(tag), 201);
+  const serialized = serializeTag(tag);
+  broadcast("tag.created", serialized);
+  return respond(c, serialized, 201);
 });
 
 app.patch("/tags/:id", async (c) => {
@@ -1382,7 +1395,9 @@ app.patch("/tags/:id", async (c) => {
     return updated;
   });
 
-  return respond(c, serializeTag(tag));
+  const serialized = serializeTag(tag);
+  broadcast("tag.updated", serialized);
+  return respond(c, serialized);
 });
 
 app.delete("/tags/:id", async (c) => {
@@ -1394,6 +1409,7 @@ app.delete("/tags/:id", async (c) => {
     await tx.delete(tags).where(eq(tags.id, id));
   });
 
+  broadcast("tag.deleted", { id });
   return c.body(null, 204);
 });
 
@@ -1457,7 +1473,9 @@ app.post("/items/:id/runs", async (c) => {
     return created;
   });
 
-  return respond(c, serializeRun(run), 201);
+  const serializedRun = serializeRun(run);
+  broadcast("run.created", serializedRun);
+  return respond(c, serializedRun, 201);
 });
 
 app.patch("/runs/:id", async (c) => {
@@ -1490,13 +1508,36 @@ app.patch("/runs/:id", async (c) => {
     return updated;
   });
 
-  return respond(c, serializeRun(run));
+  const serializedRun = serializeRun(run);
+  broadcast("run.updated", serializedRun);
+  return respond(c, serializedRun);
 });
 
 await checkDatabase();
 
 serve({
-  fetch: app.fetch,
+  fetch(req, server) {
+    const url = new URL(req.url);
+    if (url.pathname === "/ws") {
+      const upgraded = server.upgrade(req);
+      if (!upgraded) {
+        return new Response("WebSocket upgrade failed", { status: 400 });
+      }
+      return undefined;
+    }
+    return app.fetch(req, server);
+  },
+  websocket: {
+    open(ws) {
+      addClient(ws);
+    },
+    close(ws) {
+      removeClient(ws);
+    },
+    message() {
+      // Client messages are ignored — server push only
+    },
+  },
   port: config.apiPort,
 });
 
