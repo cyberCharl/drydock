@@ -2,12 +2,14 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { serve } from "bun";
 import {
+  alias,
   and,
   asc,
   count,
   desc,
   eq,
   exists,
+  ne,
   isNull,
   sql,
 } from "drizzle-orm";
@@ -21,6 +23,7 @@ import {
   agentRunStatusEnum,
   agentRuns,
   changelog,
+  itemDependencies,
   itemPriorityEnum,
   itemStatusEnum,
   itemTags,
@@ -44,6 +47,27 @@ const priorityRank = sql<number>`case ${items.priority}
   when 'medium' then 2
   when 'low' then 3
   else 4
+end`;
+const blockingDependencyItems = alias(items, "blocking_dependency_items");
+const blockedReadyRank = sql<number>`case
+  when ${items.status} = 'ready'
+    and ${exists(
+      db
+        .select({ value: sql`1` })
+        .from(itemDependencies)
+        .innerJoin(
+          blockingDependencyItems,
+          eq(itemDependencies.dependsOnId, blockingDependencyItems.id),
+        )
+        .where(
+          and(
+            eq(itemDependencies.itemId, items.id),
+            ne(blockingDependencyItems.status, "shipped"),
+          ),
+        ),
+    )}
+  then 1
+  else 0
 end`;
 
 type Queryable = typeof db | DbTransaction;
@@ -369,7 +393,9 @@ const getItemOrder = (sort: SortField, direction: SortDirection) => {
 
   return [
     direction === "asc" ? asc(priorityRank) : desc(priorityRank),
+    asc(blockedReadyRank),
     desc(items.updatedAt),
+    desc(items.id),
   ] as const;
 };
 
@@ -516,6 +542,172 @@ const requireRun = async (database: Queryable, id: number) => {
   return run;
 };
 
+const listDependencyItems = async (database: Queryable, itemId: number) => {
+  const dependencyItems = alias(items, "dependency_items");
+
+  return database
+    .select({
+      id: dependencyItems.id,
+      title: dependencyItems.title,
+      status: dependencyItems.status,
+      priority: dependencyItems.priority,
+      description: dependencyItems.description,
+      parentId: dependencyItems.parentId,
+      createdBy: dependencyItems.createdBy,
+      updatedBy: dependencyItems.updatedBy,
+      createdAt: dependencyItems.createdAt,
+      updatedAt: dependencyItems.updatedAt,
+    })
+    .from(itemDependencies)
+    .innerJoin(dependencyItems, eq(itemDependencies.dependsOnId, dependencyItems.id))
+    .where(eq(itemDependencies.itemId, itemId))
+    .orderBy(desc(dependencyItems.updatedAt), desc(dependencyItems.id));
+};
+
+const listDependentItems = async (database: Queryable, itemId: number) => {
+  const dependentItems = alias(items, "dependent_items");
+
+  return database
+    .select({
+      id: dependentItems.id,
+      title: dependentItems.title,
+      status: dependentItems.status,
+      priority: dependentItems.priority,
+      description: dependentItems.description,
+      parentId: dependentItems.parentId,
+      createdBy: dependentItems.createdBy,
+      updatedBy: dependentItems.updatedBy,
+      createdAt: dependentItems.createdAt,
+      updatedAt: dependentItems.updatedAt,
+    })
+    .from(itemDependencies)
+    .innerJoin(dependentItems, eq(itemDependencies.itemId, dependentItems.id))
+    .where(eq(itemDependencies.dependsOnId, itemId))
+    .orderBy(desc(dependentItems.updatedAt), desc(dependentItems.id));
+};
+
+const listItemTags = async (database: Queryable, itemId: number) => {
+  return database
+    .select({
+      id: tags.id,
+      name: tags.name,
+      color: tags.color,
+      createdAt: tags.createdAt,
+      updatedAt: tags.updatedAt,
+    })
+    .from(itemTags)
+    .innerJoin(tags, eq(itemTags.tagId, tags.id))
+    .where(eq(itemTags.itemId, itemId))
+    .orderBy(asc(tags.name), asc(tags.id));
+};
+
+const listRecentRuns = async (database: Queryable, itemId: number) => {
+  return database
+    .select()
+    .from(agentRuns)
+    .where(eq(agentRuns.itemId, itemId))
+    .orderBy(desc(agentRuns.startedAt), desc(agentRuns.id))
+    .limit(RECENT_RUNS_LIMIT);
+};
+
+const isItemBlocked = async (database: Queryable, itemId: number) => {
+  const dependencyItems = alias(items, "dependency_items_for_blocked");
+  const blockingDependencies = await database
+    .select({ value: sql<number>`1` })
+    .from(itemDependencies)
+    .innerJoin(dependencyItems, eq(itemDependencies.dependsOnId, dependencyItems.id))
+    .where(
+      and(
+        eq(itemDependencies.itemId, itemId),
+        ne(dependencyItems.status, "shipped"),
+      ),
+    )
+    .limit(1);
+
+  return blockingDependencies.length > 0;
+};
+
+const assertNoCircularDependency = async (
+  database: Queryable,
+  itemId: number,
+  dependsOnId: number,
+) => {
+  const visited = new Set<number>();
+  const stack = [dependsOnId];
+
+  while (stack.length > 0) {
+    const currentId = stack.pop() as number;
+
+    if (currentId === itemId) {
+      throw new ApiError(
+        400,
+        "circular_dependency",
+        `Adding dependency ${itemId} -> ${dependsOnId} would create a cycle.`,
+      );
+    }
+
+    if (visited.has(currentId)) {
+      continue;
+    }
+
+    visited.add(currentId);
+
+    const nextDependencies = await database
+      .select({
+        dependsOnId: itemDependencies.dependsOnId,
+      })
+      .from(itemDependencies)
+      .where(eq(itemDependencies.itemId, currentId));
+
+    for (const dependency of nextDependencies) {
+      if (!visited.has(dependency.dependsOnId)) {
+        stack.push(dependency.dependsOnId);
+      }
+    }
+  }
+};
+
+const serializeDetailedItem = async (
+  database: Queryable,
+  item: {
+    id: number;
+    title: string;
+    status: string;
+    priority: string;
+    description: string | null;
+    parentId: number | null;
+    createdBy: string;
+    updatedBy: string;
+    createdAt: Date | string;
+    updatedAt: Date | string;
+  },
+  depth = 0,
+) => {
+  const emptyItems: Awaited<ReturnType<typeof listDependencyItems>> = [];
+  const [tagRows, runRows, blocked, dependencyRows, dependentRows] = await Promise.all([
+    listItemTags(database, item.id),
+    listRecentRuns(database, item.id),
+    isItemBlocked(database, item.id),
+    depth === 0
+      ? listDependencyItems(database, item.id)
+      : Promise.resolve(emptyItems),
+    depth === 0 ? listDependentItems(database, item.id) : Promise.resolve(emptyItems),
+  ]);
+
+  return {
+    ...serializeItem(item),
+    tags: tagRows.map(serializeTag),
+    recent_runs: runRows.map(serializeRun),
+    dependencies: await Promise.all(
+      dependencyRows.map((dependency) => serializeDetailedItem(database, dependency, depth + 1)),
+    ),
+    dependents: await Promise.all(
+      dependentRows.map((dependent) => serializeDetailedItem(database, dependent, depth + 1)),
+    ),
+    blocked,
+  };
+};
+
 const validateParent = async (
   database: Queryable,
   parentId: number | null | undefined,
@@ -635,6 +827,16 @@ const parseAssignTagBody = (body: Record<string, unknown>) => {
   }
 
   return { tagId, tagName };
+};
+
+const parseCreateDependencyBody = (body: Record<string, unknown>) => {
+  const dependsOnId = parseOptionalBodyId(body.depends_on, "depends_on");
+
+  if (dependsOnId === undefined) {
+    throw new ApiError(400, "validation_error", "depends_on is required.");
+  }
+
+  return { dependsOnId };
 };
 
 const parseCreateRunBody = (body: Record<string, unknown>) => {
@@ -885,32 +1087,9 @@ app.get("/items", async (c) => {
 
 app.get("/items/:id", async (c) => {
   const id = parseId(c.req.param("id"), "id");
-  const item = await db.query.items.findFirst({
-    where: (table, { eq: equals }) => equals(table.id, id),
-    with: {
-      itemTags: {
-        with: {
-          tag: true,
-        },
-      },
-      runs: {
-        limit: RECENT_RUNS_LIMIT,
-        orderBy: (table, { desc: descending }) => [descending(table.startedAt)],
-      },
-    },
-  });
+  const item = await requireItem(db, id);
 
-  if (!item) {
-    throw new ApiError(404, "item_not_found", `Item ${id} was not found.`);
-  }
-
-  return c.json({
-    data: {
-      ...serializeItem(item),
-      tags: item.itemTags.map((itemTag) => serializeTag(itemTag.tag)),
-      recent_runs: item.runs.map(serializeRun),
-    },
-  });
+  return respond(c, await serializeDetailedItem(db, item));
 });
 
 app.patch("/items/:id", async (c) => {
@@ -989,6 +1168,98 @@ app.get("/items/:id/changelog", async (c) => {
     .orderBy(desc(changelog.changedAt), desc(changelog.id));
 
   return respond(c, entries.map(serializeChangelog));
+});
+
+app.post("/items/:id/dependencies", async (c) => {
+  const itemId = parseId(c.req.param("id"), "id");
+  const actor = getActor(c);
+  const body = parseCreateDependencyBody(await parseJsonBody(c));
+
+  const dependency = await runInTransaction(actor, async (tx) => {
+    await requireItem(tx, itemId);
+    const dependsOn = await requireItem(tx, body.dependsOnId);
+
+    if (itemId === body.dependsOnId) {
+      throw new ApiError(
+        400,
+        "invalid_dependency",
+        "An item cannot depend on itself.",
+      );
+    }
+
+    await assertNoCircularDependency(tx, itemId, body.dependsOnId);
+
+    await tx
+      .insert(itemDependencies)
+      .values({
+        itemId,
+        dependsOnId: body.dependsOnId,
+      })
+      .onConflictDoNothing();
+
+    return serializeDetailedItem(tx, dependsOn, 1);
+  });
+
+  return respond(c, dependency, 201);
+});
+
+app.delete("/items/:id/dependencies/:dependsOnId", async (c) => {
+  const itemId = parseId(c.req.param("id"), "id");
+  const dependsOnId = parseId(c.req.param("dependsOnId"), "dependsOnId");
+  const actor = getActor(c);
+
+  await runInTransaction(actor, async (tx) => {
+    await requireItem(tx, itemId);
+    await requireItem(tx, dependsOnId);
+
+    const deleted = await tx
+      .delete(itemDependencies)
+      .where(
+        and(
+          eq(itemDependencies.itemId, itemId),
+          eq(itemDependencies.dependsOnId, dependsOnId),
+        ),
+      )
+      .returning();
+
+    if (deleted.length === 0) {
+      throw new ApiError(
+        404,
+        "item_dependency_not_found",
+        `Item ${itemId} does not depend on item ${dependsOnId}.`,
+      );
+    }
+  });
+
+  return c.body(null, 204);
+});
+
+app.get("/items/:id/dependencies", async (c) => {
+  const itemId = parseId(c.req.param("id"), "id");
+  await requireItem(db, itemId);
+
+  const dependencies = await listDependencyItems(db, itemId);
+
+  return respond(
+    c,
+    await Promise.all(
+      dependencies.map((dependency) => serializeDetailedItem(db, dependency, 1)),
+    ),
+  );
+});
+
+app.get("/items/:id/dependents", async (c) => {
+  const itemId = parseId(c.req.param("id"), "id");
+  await requireItem(db, itemId);
+
+  const dependents = await listDependentItems(db, itemId);
+
+  return respond(
+    c,
+    await Promise.all(
+      dependents.map((dependent) => serializeDetailedItem(db, dependent, 1)),
+    ),
+  );
 });
 
 app.post("/items/:id/tags", async (c) => {
