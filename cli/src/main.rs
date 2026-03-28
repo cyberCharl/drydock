@@ -27,6 +27,10 @@ enum Command {
         #[command(subcommand)]
         command: ItemsCommand,
     },
+    Deps {
+        #[command(subcommand)]
+        command: DepsCommand,
+    },
     Tags {
         #[command(subcommand)]
         command: TagsCommand,
@@ -53,6 +57,14 @@ enum ItemsCommand {
 enum TagsCommand {
     List,
     Create(CreateTagArgs),
+}
+
+#[derive(Subcommand)]
+enum DepsCommand {
+    Add(DependencyArgs),
+    Remove(DependencyArgs),
+    List(ItemIdArgs),
+    Dependents(ItemIdArgs),
 }
 
 #[derive(Subcommand)]
@@ -142,6 +154,14 @@ struct UpdateItemArgs {
 }
 
 #[derive(Args)]
+struct DependencyArgs {
+    id: i64,
+
+    #[arg(long = "depends-on")]
+    depends_on: i64,
+}
+
+#[derive(Args)]
 struct CreateTagArgs {
     #[arg(long)]
     name: String,
@@ -205,6 +225,7 @@ async fn run() -> Result<()> {
 
     let output = match cli.command {
         Command::Items { command } => handle_items(&client, command).await?,
+        Command::Deps { command } => handle_deps(&client, command).await?,
         Command::Tags { command } => handle_tags(&client, command).await?,
         Command::Runs { command } => handle_runs(&client, command).await?,
         Command::Init => handle_init(&client, &config.api_url).await?,
@@ -339,6 +360,37 @@ async fn handle_tags(client: &ApiClient, command: TagsCommand) -> Result<Value> 
             }
 
             client.post("/tags", Value::Object(body)).await
+        }
+    }
+}
+
+async fn handle_deps(client: &ApiClient, command: DepsCommand) -> Result<Value> {
+    match command {
+        DepsCommand::Add(args) => {
+            client
+                .post(
+                    &format!("/items/{}/dependencies", args.id),
+                    json!({
+                        "depends_on": args.depends_on,
+                    }),
+                )
+                .await
+        }
+        DepsCommand::Remove(args) => {
+            client
+                .delete(&format!(
+                    "/items/{}/dependencies/{}",
+                    args.id, args.depends_on
+                ))
+                .await
+        }
+        DepsCommand::List(args) => {
+            client
+                .get(&format!("/items/{}/dependencies", args.id))
+                .await
+        }
+        DepsCommand::Dependents(args) => {
+            client.get(&format!("/items/{}/dependents", args.id)).await
         }
     }
 }
