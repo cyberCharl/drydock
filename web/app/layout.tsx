@@ -1,6 +1,7 @@
 import { Geist, Geist_Mono } from "next/font/google"
 
 import "./globals.css"
+import { AppProviders } from "@/components/app-providers"
 import { ThemeProvider } from "@/components/theme-provider"
 
 const fontSans = Geist({
@@ -25,7 +26,9 @@ export default function RootLayout({
       className={`${fontSans.variable} ${fontMono.variable} font-sans antialiased`}
     >
       <body className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          <AppProviders>{children}</AppProviders>
+        </ThemeProvider>
       </body>
     </html>
   )
