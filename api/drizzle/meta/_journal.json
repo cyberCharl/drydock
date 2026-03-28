@@ -15,6 +15,13 @@
       "when": 1774696932446,
       "tag": "0001_add_item_changelog_trigger",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1774704621310,
+      "tag": "0002_glorious_annihilus",
+      "breakpoints": true
     }
   ]
 }

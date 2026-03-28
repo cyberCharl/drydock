@@ -1,5 +1,6 @@
 import { relations, sql } from "drizzle-orm";
 import {
+  check,
   index,
   integer,
   pgEnum,
@@ -15,6 +16,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 export const itemStatusEnum = pgEnum("item_status", [
   "idea",
   "speccing",
+  "ready",
   "building",
   "evaluating",
   "shipped",
@@ -111,6 +113,32 @@ export const itemTags = pgTable(
   }),
 );
 
+export const itemDependencies = pgTable(
+  "item_dependencies",
+  {
+    itemId: integer("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    dependsOnId: integer("depends_on_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({
+      columns: [table.itemId, table.dependsOnId],
+      name: "item_dependencies_pk",
+    }),
+    dependsOnIdx: index("item_dependencies_depends_on_idx").on(table.dependsOnId),
+    noSelfReference: check(
+      "item_dependencies_no_self_reference",
+      sql`${table.itemId} <> ${table.dependsOnId}`,
+    ),
+  }),
+);
+
 export const agentRuns = pgTable(
   "agent_runs",
   {
@@ -164,6 +192,12 @@ export const itemsRelations = relations(items, ({ one, many }) => ({
     relationName: "item_parent",
   }),
   itemTags: many(itemTags),
+  dependencies: many(itemDependencies, {
+    relationName: "item_dependencies_item",
+  }),
+  dependents: many(itemDependencies, {
+    relationName: "item_dependencies_depends_on",
+  }),
   runs: many(agentRuns),
   changelogEntries: many(changelog),
 }));
@@ -180,6 +214,19 @@ export const itemTagsRelations = relations(itemTags, ({ one }) => ({
   tag: one(tags, {
     fields: [itemTags.tagId],
     references: [tags.id],
+  }),
+}));
+
+export const itemDependenciesRelations = relations(itemDependencies, ({ one }) => ({
+  item: one(items, {
+    fields: [itemDependencies.itemId],
+    references: [items.id],
+    relationName: "item_dependencies_item",
+  }),
+  dependsOn: one(items, {
+    fields: [itemDependencies.dependsOnId],
+    references: [items.id],
+    relationName: "item_dependencies_depends_on",
   }),
 }));
 
