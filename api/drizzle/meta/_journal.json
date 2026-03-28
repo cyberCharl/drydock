@@ -8,6 +8,13 @@
       "when": 1774696854662,
       "tag": "0000_chief_omega_flight",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1774696932446,
+      "tag": "0001_add_item_changelog_trigger",
+      "breakpoints": true
     }
   ]
 }
