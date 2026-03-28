@@ -217,6 +217,7 @@ export function WorkbenchApp() {
             setSelectedItemId(null)
           }
         }}
+        onSelectItem={setSelectedItemId}
       />
     </main>
   )
