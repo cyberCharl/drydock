@@ -220,11 +220,23 @@ async fn handle_items(client: &ApiClient, command: ItemsCommand) -> Result<Value
             push_query(&mut query, "status", args.status);
             push_query(&mut query, "priority", args.priority);
             push_query(&mut query, "tag", args.tag);
-            push_query(&mut query, "parent_id", args.parent.map(|value| value.to_string()));
+            push_query(
+                &mut query,
+                "parent_id",
+                args.parent.map(|value| value.to_string()),
+            );
             push_query(&mut query, "created_by", args.created_by);
             push_query(&mut query, "sort", Some(args.sort));
-            push_query(&mut query, "limit", args.limit.map(|value| value.to_string()));
-            push_query(&mut query, "offset", args.offset.map(|value| value.to_string()));
+            push_query(
+                &mut query,
+                "limit",
+                args.limit.map(|value| value.to_string()),
+            );
+            push_query(
+                &mut query,
+                "offset",
+                args.offset.map(|value| value.to_string()),
+            );
 
             client.get_with_query("/items", &query).await
         }
@@ -311,9 +323,7 @@ async fn handle_items(client: &ApiClient, command: ItemsCommand) -> Result<Value
         }
         ItemsCommand::Delete(args) => client.delete(&format!("/items/{}", args.id)).await,
         ItemsCommand::Children(args) => client.get(&format!("/items/{}/children", args.id)).await,
-        ItemsCommand::Changelog(args) => {
-            client.get(&format!("/items/{}/changelog", args.id)).await
-        }
+        ItemsCommand::Changelog(args) => client.get(&format!("/items/{}/changelog", args.id)).await,
     }
 }
 
@@ -485,7 +495,8 @@ fn extract_data_id(value: &Value) -> Result<i64> {
 }
 
 fn extract_id_from_object(value: &Value) -> Result<i64> {
-    value.get("id")
+    value
+        .get("id")
         .and_then(Value::as_i64)
         .ok_or_else(|| anyhow!("response missing integer id"))
 }

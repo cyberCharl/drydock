@@ -119,7 +119,10 @@ fn render_object(map: &Map<String, Value>) {
 }
 
 fn print_grid(headers: &[String], rows: &[Vec<String>]) {
-    let mut widths = headers.iter().map(|header| header.len()).collect::<Vec<_>>();
+    let mut widths = headers
+        .iter()
+        .map(|header| header.len())
+        .collect::<Vec<_>>();
 
     for row in rows {
         for (index, cell) in row.iter().enumerate() {

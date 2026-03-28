@@ -76,7 +76,10 @@ impl ApiClient {
                 return Ok(Value::Null);
             }
 
-            return Err(anyhow!("HTTP {} returned an empty error response", status.as_u16()));
+            return Err(anyhow!(
+                "HTTP {} returned an empty error response",
+                status.as_u16()
+            ));
         }
 
         let json = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| Value::String(text));
@@ -86,10 +89,7 @@ impl ApiClient {
         }
 
         if let Some(error) = json.get("error").and_then(Value::as_object) {
-            let code = error
-                .get("code")
-                .and_then(Value::as_str)
-                .unwrap_or("error");
+            let code = error.get("code").and_then(Value::as_str).unwrap_or("error");
             let message = error
                 .get("message")
                 .and_then(Value::as_str)

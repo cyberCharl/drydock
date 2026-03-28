@@ -1,43 +1,84 @@
 # Drydock
 
-The workbench / state store for the Gyre coding agent loop system.
+The workbench and state store for the **Gyre** autonomous coding agent loop system. Drydock tracks work items, agent runs, and provides a full audit trail — serving as the shared state surface that all other Gyre modules (Bosun, Dogwatch) consume via its REST API and CLI.
 
-Part of the Gyre system.
+## Architecture
+
+Drydock is one module in the Gyre system:
+
+```
+Gyre (the system)
+├── Drydock  ← this repo (workbench / state store)
+├── Bosun    (dispatch)
+├── Dogwatch (check loop)
+└── [TBD]    (middleware)
+```
+
+Other modules interact with Drydock exclusively through its REST API or CLI — never direct DB access.
 
 ## Stack
 
-- Postgres 16 via Docker Compose
-- Hono API on Bun
-- Drizzle for schema and migrations
-- Rust CLI (`drydock`)
+| Layer          | Choice                | Notes                          |
+| -------------- | --------------------- | ------------------------------ |
+| Database       | Postgres 16           | Triggers for changelog         |
+| ORM            | Drizzle (TypeScript)  | Type-safe, schema-as-code      |
+| API            | Hono (TypeScript/Bun)  | Lightweight, fast              |
+| CLI            | Rust (`drydock`)      | Fast, portable, calls REST API |
+| Infrastructure | Docker Compose        | Single `docker compose up`     |
 
-## Local setup
-
-1. Review `.env` or copy `.env.example` if you want to override defaults.
-2. Start the stack:
+## Quick Start
 
 ```bash
+# 1. Copy env defaults
+cp .env.example .env
+
+# 2. Start the stack
 docker compose up --build
-```
 
-3. Check the API health endpoint:
-
-```bash
+# 3. Verify
 curl http://localhost:3000/health
 ```
 
-## Environment variables
+## CLI
 
-`.env.example` documents the local development defaults:
+The `drydock` CLI wraps the REST API:
 
-- `POSTGRES_DB`
-- `POSTGRES_USER`
-- `POSTGRES_PASSWORD`
-- `POSTGRES_PORT`
-- `API_PORT`
+```bash
+# Build
+cd cli && cargo build --release
 
-The API service receives `DATABASE_URL` from Docker Compose and connects to Postgres over the shared `drydock` network.
+# Configure
+export DRYDOCK_API_URL=http://localhost:3000
 
-## Persistence
+# Use
+drydock init                          # Seed default tags, verify connectivity
+drydock items create --title "..."    # Create a work item
+drydock items list --status building  # Filter by status
+drydock runs create <item-id> --agent codex  # Track an agent run
+drydock items changelog <item-id>     # View audit trail
+```
 
-Postgres data is stored in the named Docker volume `postgres_data`, so the database survives `docker compose down` / `up` cycles unless you remove volumes explicitly.
+Output formats: `--format json` (default), `--format table`, `--format quiet` (IDs only).
+
+## Data Model
+
+- **Items** — work entries with status lifecycle (`idea → speccing → building → evaluating → shipped → parked → dead`) and priority (`critical > high > medium > low > none`)
+- **Tags** — flexible categorisation, assignable to items
+- **Agent Runs** — execution tracking per item (agent, branch, PR URL, CI status)
+- **Changelog** — automatic field-level audit trail via DB trigger
+
+## Environment Variables
+
+See `.env.example`:
+
+| Variable            | Default    | Description          |
+| ------------------- | ---------- | -------------------- |
+| `POSTGRES_DB`       | `drydock`  | Database name        |
+| `POSTGRES_USER`     | `drydock`  | Database user        |
+| `POSTGRES_PASSWORD` | `drydock`  | Database password    |
+| `POSTGRES_PORT`     | `5432`     | Postgres port        |
+| `API_PORT`          | `3000`     | API server port      |
+
+## License
+
+MIT — see [LICENSE](LICENSE).

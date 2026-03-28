@@ -47,8 +47,7 @@ fn load_file_config() -> Result<FileConfig> {
     let raw = fs::read_to_string(&path)
         .with_context(|| format!("failed to read config file {}", path.display()))?;
 
-    toml::from_str(&raw)
-        .with_context(|| format!("failed to parse config file {}", path.display()))
+    toml::from_str(&raw).with_context(|| format!("failed to parse config file {}", path.display()))
 }
 
 fn config_path() -> Option<PathBuf> {
