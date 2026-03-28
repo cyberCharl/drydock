@@ -14,6 +14,11 @@ const fontMono = Geist_Mono({
   variable: "--font-mono",
 })
 
+export const metadata = {
+  title: "Drydock",
+  description: "Gyre Workbench",
+}
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -25,7 +30,7 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${fontSans.variable} ${fontMono.variable} font-sans antialiased`}
     >
-      <body className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
+      <body className="min-h-screen bg-background text-foreground">
         <ThemeProvider>
           <AppProviders>{children}</AppProviders>
         </ThemeProvider>
