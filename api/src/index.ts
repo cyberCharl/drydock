@@ -2,7 +2,6 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { serve } from "bun";
 import {
-  alias,
   and,
   asc,
   count,
@@ -14,6 +13,7 @@ import {
   sql,
 } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 
 import { config } from "./config";
 import { checkDatabase, db, runInTransaction } from "./db";

@@ -1,6 +1,6 @@
 # Drydock
 
-The workbench and state store for the **Gyre** autonomous coding agent loop system. Drydock tracks work items, agent runs, and provides a full audit trail — serving as the shared state surface that all other Gyre modules (Bosun, Dogwatch) consume via its REST API and CLI.
+The workbench and state store for the **Gyre** autonomous coding agent loop system. Drydock tracks work items, agent runs, and provides a full audit trail — serving as the shared state surface that all other Gyre modules (Slipway, Dogwatch) consume via its REST API and CLI.
 
 ## Architecture
 
@@ -9,9 +9,9 @@ Drydock is one module in the Gyre system:
 ```
 Gyre (the system)
 ├── Drydock  ← this repo (workbench / state store)
-├── Bosun    (dispatch)
+├── Slipway  (dispatch)
 ├── Dogwatch (check loop)
-└── [TBD]    (middleware)
+└── Rigger   (middleware)
 ```
 
 Other modules interact with Drydock exclusively through its REST API or CLI — never direct DB access.
