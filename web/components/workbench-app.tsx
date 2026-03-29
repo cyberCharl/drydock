@@ -1,7 +1,16 @@
 "use client"
 
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertCircle, LayoutGrid, List, LoaderCircle, Plus, Workflow } from "lucide-react"
+import {
+  AlertCircle,
+  LayoutGrid,
+  List,
+  LoaderCircle,
+  Pause,
+  Play,
+  Plus,
+  Workflow,
+} from "lucide-react"
 import { useEffect, useState } from "react"
 
 import { BoardLoadingState, BoardView } from "@/components/board-view"
@@ -11,7 +20,14 @@ import { ListView } from "@/components/list-view"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { createItem, getItem, listItems, listTags } from "@/lib/api"
+import {
+  createItem,
+  fetchPausedState,
+  getItem,
+  listItems,
+  listTags,
+  updatePausedState,
+} from "@/lib/api"
 import {
   HIDDEN_BOARD_STATUSES,
   isHiddenBoardStatus,
@@ -49,6 +65,11 @@ export function WorkbenchApp() {
     queryFn: listTags,
   })
 
+  const pausedQuery = useQuery({
+    queryKey: ["meta", "paused"],
+    queryFn: fetchPausedState,
+  })
+
   const itemDetailQueries = useQueries({
     queries: (itemListQuery.data?.data ?? []).map((item) => ({
       queryKey: ["item", item.id],
@@ -67,6 +88,13 @@ export function WorkbenchApp() {
     },
   })
 
+  const pauseMutation = useMutation({
+    mutationFn: updatePausedState,
+    onSuccess: (data) => {
+      queryClient.setQueryData(["meta", "paused"], data)
+    },
+  })
+
   const detailedItems = itemDetailQueries
     .map((query) => query.data)
     .filter((item): item is DetailedItem => item !== undefined)
@@ -77,6 +105,9 @@ export function WorkbenchApp() {
       itemDetailQueries.length > 0 &&
       detailedItems.length === 0 &&
       itemDetailQueries.some((query) => query.isPending))
+
+  const paused = pausedQuery.data?.paused ?? false
+  const isPausePending = pausedQuery.isPending || pauseMutation.isPending
 
   const boardItems = detailedItems.filter((item) =>
     showHidden ? true : !isHiddenBoardStatus(item.status),
@@ -142,6 +173,26 @@ export function WorkbenchApp() {
           <div className="flex flex-wrap items-center gap-3">
             <Button
               type="button"
+              variant="ghost"
+              className={
+                paused
+                  ? "border-amber-400/30 bg-amber-400/12 text-amber-100 hover:bg-amber-400/18"
+                  : "border-emerald-400/30 bg-emerald-400/12 text-emerald-100 hover:bg-emerald-400/18"
+              }
+              disabled={isPausePending}
+              onClick={() => pauseMutation.mutate(!paused)}
+            >
+              {isPausePending ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : paused ? (
+                <Play className="size-4" />
+              ) : (
+                <Pause className="size-4" />
+              )}
+              {paused ? "Paused" : "Active"}
+            </Button>
+            <Button
+              type="button"
               variant={viewMode === "board" ? "secondary" : "ghost"}
               className={
                 viewMode === "board"
@@ -193,6 +244,8 @@ export function WorkbenchApp() {
           ) : null}
           {itemListQuery.isError ? <InlineError message={itemListQuery.error.message} /> : null}
           {tagListQuery.isError ? <InlineError message={tagListQuery.error.message} /> : null}
+          {pausedQuery.isError ? <InlineError message={pausedQuery.error.message} /> : null}
+          {pauseMutation.isError ? <InlineError message={pauseMutation.error.message} /> : null}
         </header>
 
         <section className="flex-1 py-8">

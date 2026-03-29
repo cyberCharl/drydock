@@ -21,6 +21,7 @@ import type { DbTransaction } from "./db";
 import { addClient, broadcast, removeClient } from "./ws";
 import {
   agentRunCiStatusEnum,
+  agentRunReviewStatusEnum,
   agentRunStatusEnum,
   agentRuns,
   changelog,
@@ -29,6 +30,7 @@ import {
   itemStatusEnum,
   itemTags,
   items,
+  metadata,
   tags,
 } from "./schema";
 
@@ -38,6 +40,7 @@ const ITEM_STATUSES = new Set(itemStatusEnum.enumValues);
 const ITEM_PRIORITIES = new Set(itemPriorityEnum.enumValues);
 const RUN_STATUSES = new Set(agentRunStatusEnum.enumValues);
 const RUN_CI_STATUSES = new Set(agentRunCiStatusEnum.enumValues);
+const RUN_REVIEW_STATUSES = new Set(agentRunReviewStatusEnum.enumValues);
 const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -295,6 +298,56 @@ const parseTimestamp = (
   return parsed;
 };
 
+const parseInteger = (
+  value: unknown,
+  field: string,
+  options: { nullable?: boolean; min?: number; max?: number } = {},
+) => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
+    if (options.nullable) {
+      return null;
+    }
+
+    throw new ApiError(400, "validation_error", `${field} cannot be null.`);
+  }
+
+  if (!Number.isInteger(value)) {
+    throw new ApiError(400, "validation_error", `${field} must be an integer.`);
+  }
+
+  const normalized = Number(value);
+
+  if (options.min !== undefined && normalized < options.min) {
+    throw new ApiError(
+      400,
+      "validation_error",
+      `${field} must be at least ${options.min}.`,
+    );
+  }
+
+  if (options.max !== undefined && normalized > options.max) {
+    throw new ApiError(
+      400,
+      "validation_error",
+      `${field} must be at most ${options.max}.`,
+    );
+  }
+
+  return normalized;
+};
+
+const parseBoolean = (value: unknown, field: string) => {
+  if (typeof value !== "boolean") {
+    throw new ApiError(400, "validation_error", `${field} must be a boolean.`);
+  }
+
+  return value;
+};
+
 const parseLimit = (value: string | undefined) => {
   if (value === undefined) {
     return DEFAULT_LIMIT;
@@ -447,9 +500,13 @@ const serializeRun = (run: {
   itemId: number;
   agent: string;
   branch: string | null;
+  sessionId: string | null;
   status: string;
   prUrl: string | null;
   ciStatus: string;
+  reviewStatus: string;
+  retryCount: number;
+  repo: string | null;
   notes: string | null;
   startedAt: Date | string;
   completedAt: Date | string | null;
@@ -461,9 +518,13 @@ const serializeRun = (run: {
     item_id: run.itemId,
     agent: run.agent,
     branch: run.branch,
+    session_id: run.sessionId,
     status: run.status,
     pr_url: run.prUrl,
     ci_status: run.ciStatus,
+    review_status: run.reviewStatus,
+    retry_count: run.retryCount,
+    repo: run.repo,
     notes: run.notes,
     started_at: formatTimestamp(run.startedAt),
     completed_at: formatTimestamp(run.completedAt),
@@ -514,6 +575,44 @@ const findRunById = async (database: Queryable, id: number) => {
     .where(eq(agentRuns.id, id))
     .limit(1);
   return run ?? null;
+};
+
+const findMetadataByKey = async (database: Queryable, key: string) => {
+  const [entry] = await database
+    .select()
+    .from(metadata)
+    .where(eq(metadata.key, key))
+    .limit(1);
+
+  return entry ?? null;
+};
+
+const getPausedState = async (database: Queryable) => {
+  const entry = await findMetadataByKey(database, "paused");
+  return entry?.value === "true";
+};
+
+const setPausedState = async (database: Queryable, paused: boolean) => {
+  const value = paused ? "true" : "false";
+  const updatedAt = new Date();
+
+  const [entry] = await database
+    .insert(metadata)
+    .values({
+      key: "paused",
+      value,
+      updatedAt,
+    })
+    .onConflictDoUpdate({
+      target: metadata.key,
+      set: {
+        value,
+        updatedAt,
+      },
+    })
+    .returning();
+
+  return entry;
 };
 
 const requireItem = async (database: Queryable, id: number) => {
@@ -849,9 +948,20 @@ const parseCreateRunBody = (body: Record<string, unknown>) => {
       maxLength: 64,
     }) as string,
     branch: parseText(body.branch, "branch", { nullable: true, maxLength: 255 }) ?? null,
+    sessionId:
+      parseText(body.session_id, "session_id", { nullable: true, maxLength: 255 }) ??
+      null,
     status: parseEnum(body.status, "status", RUN_STATUSES, "running"),
     prUrl: parseText(body.pr_url, "pr_url", { nullable: true }) ?? null,
     ciStatus: parseEnum(body.ci_status, "ci_status", RUN_CI_STATUSES, "unknown"),
+    reviewStatus: parseEnum(
+      body.review_status,
+      "review_status",
+      RUN_REVIEW_STATUSES,
+      "pending",
+    ),
+    retryCount: parseInteger(body.retry_count, "retry_count", { min: 0 }) ?? 0,
+    repo: parseText(body.repo, "repo", { nullable: true, maxLength: 255 }) ?? null,
     notes: parseText(body.notes, "notes", { nullable: true }) ?? null,
     completedAt: parseTimestamp(body.completed_at, "completed_at", {
       nullable: true,
@@ -863,8 +973,19 @@ const parsePatchRunBody = (body: Record<string, unknown>) => {
   const patch = {
     status: parseEnum(body.status, "status", RUN_STATUSES),
     branch: parseText(body.branch, "branch", { nullable: true, maxLength: 255 }),
+    sessionId: parseText(body.session_id, "session_id", {
+      nullable: true,
+      maxLength: 255,
+    }),
     prUrl: parseText(body.pr_url, "pr_url", { nullable: true }),
     ciStatus: parseEnum(body.ci_status, "ci_status", RUN_CI_STATUSES),
+    reviewStatus: parseEnum(
+      body.review_status,
+      "review_status",
+      RUN_REVIEW_STATUSES,
+    ),
+    retryCount: parseInteger(body.retry_count, "retry_count", { min: 0 }),
+    repo: parseText(body.repo, "repo", { nullable: true, maxLength: 255 }),
     notes: parseText(body.notes, "notes", { nullable: true }),
     completedAt: parseTimestamp(body.completed_at, "completed_at", { nullable: true }),
   };
@@ -963,6 +1084,24 @@ app.get("/health", async (c) => {
     status: "ok",
     database: "reachable",
   });
+});
+
+app.get("/meta/paused", async (c) => {
+  return c.json({
+    paused: await getPausedState(db),
+  });
+});
+
+app.put("/meta/paused", async (c) => {
+  const actor = getActor(c);
+  const body = await parseJsonBody(c);
+  const paused = parseBoolean(body.paused, "paused");
+
+  await runInTransaction(actor, async (tx) => {
+    await setPausedState(tx, paused);
+  });
+
+  return c.json({ paused });
 });
 
 app.post("/items", async (c) => {
@@ -1462,9 +1601,13 @@ app.post("/items/:id/runs", async (c) => {
         itemId,
         agent: body.agent,
         branch: body.branch,
+        sessionId: body.sessionId,
         status: body.status,
         prUrl: body.prUrl,
         ciStatus: body.ciStatus,
+        reviewStatus: body.reviewStatus,
+        retryCount: body.retryCount,
+        repo: body.repo,
         notes: body.notes,
         completedAt,
       })
@@ -1496,8 +1639,14 @@ app.patch("/runs/:id", async (c) => {
       .set({
         ...(patch.status !== undefined ? { status: patch.status } : {}),
         ...(patch.branch !== undefined ? { branch: patch.branch } : {}),
+        ...(patch.sessionId !== undefined ? { sessionId: patch.sessionId } : {}),
         ...(patch.prUrl !== undefined ? { prUrl: patch.prUrl } : {}),
         ...(patch.ciStatus !== undefined ? { ciStatus: patch.ciStatus } : {}),
+        ...(patch.reviewStatus !== undefined
+          ? { reviewStatus: patch.reviewStatus }
+          : {}),
+        ...(patch.retryCount !== undefined ? { retryCount: patch.retryCount } : {}),
+        ...(patch.repo !== undefined ? { repo: patch.repo } : {}),
         ...(patch.notes !== undefined ? { notes: patch.notes } : {}),
         completedAt,
         updatedAt: new Date(),
