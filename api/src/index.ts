@@ -508,6 +508,7 @@ const serializeRun = (run: {
   retryCount: number;
   repo: string | null;
   notes: string | null;
+  itemTitle?: string | null;
   startedAt: Date | string;
   completedAt: Date | string | null;
   createdAt: Date | string;
@@ -526,6 +527,7 @@ const serializeRun = (run: {
     retry_count: run.retryCount,
     repo: run.repo,
     notes: run.notes,
+    item_title: run.itemTitle,
     started_at: formatTimestamp(run.startedAt),
     completed_at: formatTimestamp(run.completedAt),
     created_at: formatTimestamp(run.createdAt),
@@ -1552,6 +1554,66 @@ app.delete("/tags/:id", async (c) => {
   return c.body(null, 204);
 });
 
+app.get("/runs", async (c) => {
+  const status = c.req.query("status");
+  const repo = c.req.query("repo");
+  const branch = c.req.query("branch");
+  const limit = parseLimit(c.req.query("limit"));
+  const offset = parseOffset(c.req.query("offset"));
+
+  if (status !== undefined && !RUN_STATUSES.has(status)) {
+    throw new ApiError(
+      400,
+      "validation_error",
+      `status must be one of: ${Array.from(RUN_STATUSES).join(", ")}.`,
+    );
+  }
+
+  const filters: SQL[] = [];
+
+  if (status !== undefined) {
+    filters.push(eq(agentRuns.status, status));
+  }
+
+  if (repo !== undefined) {
+    filters.push(eq(agentRuns.repo, repo));
+  }
+
+  if (branch !== undefined) {
+    filters.push(eq(agentRuns.branch, branch));
+  }
+
+  const whereClause = filters.length > 0 ? and(...filters) : undefined;
+  const listQuery = db
+    .select({
+      run: agentRuns,
+      itemTitle: items.title,
+    })
+    .from(agentRuns)
+    .innerJoin(items, eq(agentRuns.itemId, items.id))
+    .orderBy(desc(agentRuns.startedAt), desc(agentRuns.id))
+    .limit(limit)
+    .offset(offset);
+  const countQuery = db
+    .select({ total: count() })
+    .from(agentRuns)
+    .innerJoin(items, eq(agentRuns.itemId, items.id));
+
+  const [rows, totalRows] = await Promise.all([
+    whereClause === undefined ? listQuery : listQuery.where(whereClause),
+    whereClause === undefined ? countQuery : countQuery.where(whereClause),
+  ]);
+
+  return c.json({
+    data: rows.map(({ run, itemTitle }) => serializeRun({ ...run, itemTitle })),
+    pagination: {
+      limit,
+      offset,
+      total: Number(totalRows[0]?.total ?? 0),
+    },
+  });
+});
+
 app.get("/items/:id/runs", async (c) => {
   const itemId = parseId(c.req.param("id"), "id");
   const limit = parseLimit(c.req.query("limit"));
@@ -1561,8 +1623,12 @@ app.get("/items/:id/runs", async (c) => {
 
   const [rows, totalRows] = await Promise.all([
     db
-      .select()
+      .select({
+        run: agentRuns,
+        itemTitle: items.title,
+      })
       .from(agentRuns)
+      .innerJoin(items, eq(agentRuns.itemId, items.id))
       .where(eq(agentRuns.itemId, itemId))
       .orderBy(desc(agentRuns.startedAt), desc(agentRuns.id))
       .limit(limit)
@@ -1571,7 +1637,7 @@ app.get("/items/:id/runs", async (c) => {
   ]);
 
   return c.json({
-    data: rows.map(serializeRun),
+    data: rows.map(({ run, itemTitle }) => serializeRun({ ...run, itemTitle })),
     pagination: {
       limit,
       offset,
