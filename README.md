@@ -48,7 +48,7 @@ The `drydock` CLI wraps the REST API:
 cd cli && cargo build --release
 
 # Configure
-export DRYDOCK_API_URL=http://localhost:3000
+export DRYDOCK_API_URL=http://localhost:3211
 
 # Use
 drydock init                          # Seed default tags, verify connectivity
@@ -64,7 +64,8 @@ Output formats: `--format json` (default), `--format table`, `--format quiet` (I
 
 - **Items** — work entries with status lifecycle (`idea → speccing → building → evaluating → shipped → parked → dead`) and priority (`critical > high > medium > low > none`)
 - **Tags** — flexible categorisation, assignable to items
-- **Agent Runs** — execution tracking per item (agent, branch, PR URL, CI status)
+- **Agent Runs** — execution tracking per item (agent, branch, session_id, PR URL, CI status, review status, retry count, repo)
+- **Metadata** — key-value store for system flags (e.g. global pause)
 - **Changelog** — automatic field-level audit trail via DB trigger
 
 ## Environment Variables
@@ -77,7 +78,37 @@ See `.env.example`:
 | `POSTGRES_USER`     | `drydock`  | Database user        |
 | `POSTGRES_PASSWORD` | `drydock`  | Database password    |
 | `POSTGRES_PORT`     | `5432`     | Postgres port        |
-| `API_PORT`          | `3000`     | API server port      |
+| `API_PORT`          | `3211`     | API server port                |
+| `WEB_PORT`          | `3210`     | Web frontend port              |
+
+## API Endpoints
+
+### Items
+- `GET /items` — list items (filters: status, priority, tag, parent_id, created_by, sort, direction)
+- `POST /items` — create item
+- `GET /items/:id` — get item detail
+- `PATCH /items/:id` — update item
+- `DELETE /items/:id` — soft-delete item (→ dead status)
+
+### Agent Runs
+- `GET /items/:id/runs` — list runs for an item
+- `POST /items/:id/runs` — create run for an item
+- `GET /runs` — flat listing of all runs (filters: status, repo, branch; includes item_title)
+- `PATCH /runs/:id` — update run (ci_status, review_status, retry_count, pr_url, notes, status)
+
+### Metadata
+- `GET /meta/paused` — get global pause flag
+- `PUT /meta/paused` — set global pause flag (`{"paused": true/false}`)
+
+### Tags
+- `GET /tags` — list tags
+- `POST /tags` — create tag
+- `PATCH /tags/:id` — update tag
+- `DELETE /tags/:id` — delete tag
+
+### Health
+- `GET /` — basic status
+- `GET /health` — database connectivity check
 
 ## License
 
