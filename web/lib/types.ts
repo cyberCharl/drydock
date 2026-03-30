@@ -30,6 +30,7 @@ export interface Tag {
 export interface AgentRun {
   id: number
   item_id: number
+  item_title?: string | null
   agent: string
   branch: string | null
   session_id: string | null
