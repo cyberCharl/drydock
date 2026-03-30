@@ -179,6 +179,18 @@ struct CreateRunArgs {
 
     #[arg(long)]
     branch: Option<String>,
+
+    #[arg(long = "session-id")]
+    session_id: Option<String>,
+
+    #[arg(long = "review-status")]
+    review_status: Option<String>,
+
+    #[arg(long = "retry-count")]
+    retry_count: Option<u64>,
+
+    #[arg(long)]
+    repo: Option<String>,
 }
 
 #[derive(Args)]
@@ -208,6 +220,24 @@ struct UpdateRunArgs {
 
     #[arg(long = "clear-branch")]
     clear_branch: bool,
+
+    #[arg(long = "session-id")]
+    session_id: Option<String>,
+
+    #[arg(long = "clear-session-id")]
+    clear_session_id: bool,
+
+    #[arg(long = "review-status")]
+    review_status: Option<String>,
+
+    #[arg(long = "retry-count")]
+    retry_count: Option<u64>,
+
+    #[arg(long)]
+    repo: Option<String>,
+
+    #[arg(long = "clear-repo")]
+    clear_repo: bool,
 }
 
 #[tokio::main]
@@ -399,14 +429,31 @@ async fn handle_runs(client: &ApiClient, command: RunsCommand) -> Result<Value> 
     match command {
         RunsCommand::List(args) => client.get(&format!("/items/{}/runs", args.id)).await,
         RunsCommand::Create(args) => {
+            let mut body = Map::new();
+            body.insert("agent".to_string(), Value::String(args.agent));
+
+            if let Some(branch) = args.branch {
+                body.insert("branch".to_string(), Value::String(branch));
+            }
+
+            if let Some(session_id) = args.session_id {
+                body.insert("session_id".to_string(), Value::String(session_id));
+            }
+
+            if let Some(review_status) = args.review_status {
+                body.insert("review_status".to_string(), Value::String(review_status));
+            }
+
+            if let Some(retry_count) = args.retry_count {
+                body.insert("retry_count".to_string(), json!(retry_count));
+            }
+
+            if let Some(repo) = args.repo {
+                body.insert("repo".to_string(), Value::String(repo));
+            }
+
             client
-                .post(
-                    &format!("/items/{}/runs", args.item_id),
-                    json!({
-                        "agent": args.agent,
-                        "branch": args.branch,
-                    }),
-                )
+                .post(&format!("/items/{}/runs", args.item_id), Value::Object(body))
                 .await
         }
         RunsCommand::Update(args) => {
@@ -420,6 +467,14 @@ async fn handle_runs(client: &ApiClient, command: RunsCommand) -> Result<Value> 
 
             if args.branch.is_some() && args.clear_branch {
                 bail!("--branch and --clear-branch are mutually exclusive");
+            }
+
+            if args.session_id.is_some() && args.clear_session_id {
+                bail!("--session-id and --clear-session-id are mutually exclusive");
+            }
+
+            if args.repo.is_some() && args.clear_repo {
+                bail!("--repo and --clear-repo are mutually exclusive");
             }
 
             let mut body = Map::new();
@@ -448,6 +503,26 @@ async fn handle_runs(client: &ApiClient, command: RunsCommand) -> Result<Value> 
                 body.insert("branch".to_string(), Value::String(branch));
             } else if args.clear_branch {
                 body.insert("branch".to_string(), Value::Null);
+            }
+
+            if let Some(session_id) = args.session_id {
+                body.insert("session_id".to_string(), Value::String(session_id));
+            } else if args.clear_session_id {
+                body.insert("session_id".to_string(), Value::Null);
+            }
+
+            if let Some(review_status) = args.review_status {
+                body.insert("review_status".to_string(), Value::String(review_status));
+            }
+
+            if let Some(retry_count) = args.retry_count {
+                body.insert("retry_count".to_string(), json!(retry_count));
+            }
+
+            if let Some(repo) = args.repo {
+                body.insert("repo".to_string(), Value::String(repo));
+            } else if args.clear_repo {
+                body.insert("repo".to_string(), Value::Null);
             }
 
             if body.is_empty() {

@@ -136,9 +136,13 @@ export async function createRun(
   data: {
     agent: string
     branch?: string
+    session_id?: string
     status?: string
     pr_url?: string
     ci_status?: string
+    review_status?: string
+    retry_count?: number
+    repo?: string
     notes?: string
   }
 ) {
@@ -155,6 +159,17 @@ export async function updateRun(
   return request<AgentRun>(`/runs/${runId}`, {
     method: "PATCH",
     body: JSON.stringify(data),
+  })
+}
+
+export async function fetchPausedState() {
+  return request<{ paused: boolean }>("/meta/paused")
+}
+
+export async function updatePausedState(paused: boolean) {
+  return request<{ paused: boolean }>("/meta/paused", {
+    method: "PUT",
+    body: JSON.stringify({ paused }),
   })
 }
 

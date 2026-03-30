@@ -12,6 +12,11 @@ export type ItemPriority = "critical" | "high" | "medium" | "low" | "none"
 
 export type RunStatus = "running" | "succeeded" | "failed" | "cancelled"
 export type CIStatus = "pending" | "passed" | "failed" | "unknown"
+export type RunReviewStatus =
+  | "pending"
+  | "approved"
+  | "changes_requested"
+  | "no_reviews"
 export type ViewMode = "board" | "list"
 
 export interface Tag {
@@ -27,9 +32,13 @@ export interface AgentRun {
   item_id: number
   agent: string
   branch: string | null
+  session_id: string | null
   status: RunStatus
   pr_url: string | null
   ci_status: CIStatus
+  review_status: RunReviewStatus
+  retry_count: number
+  repo: string | null
   notes: string | null
   started_at: string
   completed_at: string | null

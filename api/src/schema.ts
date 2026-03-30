@@ -46,6 +46,13 @@ export const agentRunCiStatusEnum = pgEnum("agent_run_ci_status", [
   "unknown",
 ]);
 
+export const agentRunReviewStatusEnum = pgEnum("agent_run_review_status", [
+  "pending",
+  "approved",
+  "changes_requested",
+  "no_reviews",
+]);
+
 const currentUserSql = sql`coalesce(current_setting('app.current_user', true), 'system')`;
 
 export const items = pgTable(
@@ -148,9 +155,15 @@ export const agentRuns = pgTable(
       .references(() => items.id, { onDelete: "cascade" }),
     agent: varchar("agent", { length: 64 }).notNull(),
     branch: varchar("branch", { length: 255 }),
+    sessionId: varchar("session_id", { length: 255 }),
     status: agentRunStatusEnum("status").notNull().default("running"),
     prUrl: text("pr_url"),
     ciStatus: agentRunCiStatusEnum("ci_status").notNull().default("unknown"),
+    reviewStatus: agentRunReviewStatusEnum("review_status")
+      .notNull()
+      .default("pending"),
+    retryCount: integer("retry_count").notNull().default(0),
+    repo: varchar("repo", { length: 255 }),
     notes: text("notes"),
     startedAt: timestamp("started_at", { withTimezone: true })
       .defaultNow()
@@ -167,6 +180,14 @@ export const agentRuns = pgTable(
     itemIdIdx: index("agent_runs_item_id_idx").on(table.itemId),
   }),
 );
+
+export const metadata = pgTable("metadata", {
+  key: varchar("key", { length: 255 }).primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
 
 export const changelog = pgTable("changelog", {
   id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
@@ -248,3 +269,5 @@ export type ItemStatus = (typeof itemStatusEnum.enumValues)[number];
 export type ItemPriority = (typeof itemPriorityEnum.enumValues)[number];
 export type AgentRunStatus = (typeof agentRunStatusEnum.enumValues)[number];
 export type AgentRunCiStatus = (typeof agentRunCiStatusEnum.enumValues)[number];
+export type AgentRunReviewStatus =
+  (typeof agentRunReviewStatusEnum.enumValues)[number];
